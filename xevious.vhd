@@ -38,31 +38,6 @@
 --
 --  Use make_xevious_proms.bat to build vhd file and bin from binaries
 
---  IMPORTANT --
---    Use DE2 Control Panel to load xevious_cpu_gfx_16bits.bin to DE2 SRAM
---
---    1) Switch ON DE2
---    2) Launch QuartusII and program DE2 with "DE2_USB_API.sof"
---    3) Launch DE2 control panel
---       a) Menu Open -> Open USB port 0
---       b) (Test connexion) Tab PS2 & 7-SEG : select '3' on HEX7 and click on SET, digit on DE2 should diplay '3'
---       c) Tab SRAM / frame Sequential Write : check box 'File length'. Click on Write a file to SRAM and choose xevious_cpu_gfx_16bits.bin
---       d) wait for compete write
---       e) (check write) frame Random Access : click Read (Adress 0), rData should display '3E3E'
---       f) VERY IMPORTANT : Menu Open -> Close USB port
---    DO NOT SWITCH OFF DE2 or you will need to reload SRAM
---    4) go back to QuartusII and program DE2 with "xevious_de2.sof"
-
---    Explanation : Xevious make use of large amount of data (prom). All these data could not fit into DE2-35 FPGA. 
---    I choose to put all 3 CPUs program, foreground graphics, background graphics and sprite graphics data
---    to external memory. This lead to 68Ko of data. As DE2-35 use a 16bits width SRAM since and DE2 control panel doesn't allow
---    to load 8bits width data all data have been duplicated on both 8bits LSB and 8bits MSB. So xevious_cpu_gfx_16bits.bin 
---    is 136Ko.
-
---		For other boards one have to consider that the external data are accessed with a 18Mhz multiplexed addressing scheme. So
---    external device have to have a 55ns max access time. Of course big enough FPGA may directly implement these data bank without
---    requiring external device. It is to notice that 55ns will be not so easy to reach with Flash or SDRAM memories.    
-
 --  Xevious Hardware caracteristics :
 --
 --    3xZ80 CPU accessing each own program rom and shared ram/devices
@@ -152,18 +127,19 @@ port(
 
 -- ledr           : out std_logic_vector(17 downto 0);
 -- sw             : in  std_logic_vector(17 downto 0);
- 
+
  b_test         : in std_logic;
  b_svce         : in std_logic;
- coin           : in std_logic;
+ coin				 : in std_logic;
  start1         : in std_logic;
  start2         : in std_logic;
- up             : in std_logic;
- down           : in std_logic;
- left           : in std_logic;
- right          : in std_logic;
- fire           : in std_logic;
- bomb           : in std_logic
+
+ joystick		 : in std_logic_vector(3 downto 0);
+ controls		 : in std_logic_vector(3 downto 0);
+ credits			 : in std_logic_vector(3 downto 0);
+
+ dip_sw_a       : in std_logic_vector(7 downto 0);
+ dip_sw_b       : in std_logic_vector(7 downto 0)
  );
 end xevious;
 
@@ -284,10 +260,7 @@ architecture struct of xevious is
 
  signal cs50XX_data_cnt   : std_logic_vector( 1 downto 0);
  signal cs50XX_cmd        : std_logic_vector( 7 downto 0);
- signal cs50XX_cmd_80_do  : std_logic_vector( 7 downto 0);
- signal cs50XX_cmd_E5_do  : std_logic_vector( 7 downto 0);
  signal cs50XX_do         : std_logic_vector( 7 downto 0);
-
  signal cs50xx_rom_addr   : std_logic_vector(10 downto 0); 
  signal cs50xx_rom_do     : std_logic_vector( 7 downto 0); 
 
@@ -420,10 +393,13 @@ reset_n   <= not reset;
 
 video_en  <= ena_vidgen;
 
-dip_switch_a <= "11111111"; -- | cabinet(1) | lives(2)| bonus life(3) | coinage A(2) |
-dip_switch_b <= "1110001" & not bomb; -- |freeze(1)| difficulty(2)| input B(1) | coinage B (2) | Flags bonus life (1) | input A (1) |
-dip_switch_do <= 	dip_switch_a(to_integer(unsigned(ram_bus_addr(3 downto 0)))) & 
-									dip_switch_b(to_integer(unsigned(ram_bus_addr(3 downto 0))));
+dip_switch_a <= dip_sw_a;
+dip_switch_b <= dip_sw_b;
+dip_switch_do <= dip_switch_a(to_integer(unsigned(ram_bus_addr(3 downto 0)))) & dip_switch_b(to_integer(unsigned(ram_bus_addr(3 downto 0))));
+
+--dip_switch_a <= "11111111"; -- | cabinet(1) | lives(2)| bonus life(3) | coinage A(2) |
+--dip_switch_b <= "1110001" & not bomb; -- |freeze(1)| difficulty(2)| input B(1) | coinage B (2) | Flags bonus life (1) | input A (1) |
+--dip_switch_do <= 	dip_switch_a(to_integer(unsigned(ram_bus_addr(3 downto 0)))) & dip_switch_b(to_integer(unsigned(ram_bus_addr(3 downto 0))));
 									
 audio <= ("00" & cs54xx_audio_1 &  "00000" ) + ("00" & cs54xx_audio_2 &  "00000" )+ ('0'&snd_audio);
 --audio <= ("00" & cs54xx_audio_1 &  "00000" ) + ('0'&snd_audio);
@@ -479,11 +455,11 @@ end process;
 process (clock_18)
 begin
  if rising_edge(clock_18) then
-  ena_vidgen      <= '0';
+	ena_vidgen      <= '0';
 	ena_snd_machine <= '0';
-  cpu1_ena   <= '0';
-  cpu2_ena   <= '0';
-  cpu3_ena   <= '0';
+	cpu1_ena   <= '0';
+	cpu2_ena   <= '0';
+	cpu3_ena   <= '0';
 	ena_sprite       <= '0';
 	ena_sprite_grph0 <= '0';
 	ena_sprite_grph1 <= '0';
@@ -545,9 +521,9 @@ end process;
 -- wram2 : 0x9xxx - 0x9FFF : 64 sprites |code msb|xxx|flip v|flip h|2xV|2xH| - |xxxxxxx|pos h  msb|  
 -- wram3 : 0xAxxx - 0xAFFF : 64 sprites |                 code             | - |x|ena|   color    |
 
-sp_scan_addr <= sprite_num & sprite_state(0); -- toggle odd/even wram address, valid when sprite_state = "000" or "001"
-sp_line      <= wram1_do + vcnt(7 downto 0);  -- wram1_do = sprite vertical position when sprite_state = "000" 
---sp_line <= X"B0" + vcnt(7 downto  0); -- dbg
+sp_scan_addr <= sprite_num & sprite_state(0);	-- toggle odd/even wram address, valid when sprite_state = "000" or "001"
+sp_line      <= wram1_do + vcnt(7 downto 0);		-- wram1_do = sprite vertical position when sprite_state = "000" 
+--sp_line <= X"B0" + vcnt(7 downto  0);			-- dbg
 
 process (clock_18, ena_sprite)
 begin
@@ -566,11 +542,11 @@ begin
 --		sprite_attr <= sw(15 downto 8); -- dbg
 		sprite_vcnt <= sp_line(4 downto 0);
 		-- sprite belong to current horizontal line ? yes go to next state
-		if  sp_line(7 downto 4) = "1111" or 											-- size V x 1
-		   (sp_line(7 downto 5) = "111" and wram2_do(1)='1' )then -- size V x 2
---		   (sp_line(7 downto 5) = "111" and sw(9) ='1') then --  dbg
+		if  sp_line(7 downto 4) = "1111" or 									-- size V x 1
+		   (sp_line(7 downto 5) = "111" and wram2_do(1)='1' )then		-- size V x 2
+--		   (sp_line(7 downto 5) = "111" and sw(9) ='1') then				-- dbg
 			sprite_state <= "001";
-		-- sprite doen't belong to current horizontal line
+--			sprite doen't belong to current horizontal line
 		else
 			-- if 64th sprite reached stop sprite machine 
 			if sprite_num = "111111" then
@@ -616,7 +592,7 @@ begin
 	end if;
 
 	-- write process to shadow memory
-  -- manage sprite_hcnt to get correct graphics rom address
+	-- manage sprite_hcnt to get correct graphics rom address
 	-- loop to state "010" to get graphics data, fill 4 pixels at each loop
 	-- loop until 16 or 32 pixels written depending on sprite horizontal size
 	-- when done, go to next sprite
@@ -678,24 +654,25 @@ spflip_H <= sprite_attr(2) xor flip_h; spflip_2H <= spflip_H & spflip_H;
 spflip_V <= sprite_attr(3); spflip_2V <= spflip_V & spflip_V;
 -- finish preparing flip mask from flip attribute (flip v, flip h) and with respect to sprite size (2xV, 2xH) 
 with sprite_attr(1 downto 0) select
-spflips <= 	"0000000"                       & spflip_V & spflip_2H & spflip_V & spflip_2V when "00",
-						"000000"  &            spflip_H & spflip_V & spflip_2H & spflip_V & spflip_2V when "01",
-						"00000"   & spflip_V & '0'      & spflip_V & spflip_2H & spflip_V & spflip_2V when "10",
-						"00000"   & spflip_V & spflip_H & spflip_V & spflip_2H & spflip_V & spflip_2V when others;
+spflips <= 	"0000000" & spflip_V & spflip_2H & spflip_V & spflip_2V when "00",
+				"000000"  & spflip_H & spflip_V & spflip_2H & spflip_V & spflip_2V when "01",
+				"00000"   & spflip_V & '0' & spflip_V & spflip_2H & spflip_V & spflip_2V when "10",
+				"00000"   & spflip_V & spflip_H & spflip_V & spflip_2H & spflip_V & spflip_2V when others;
 
 -- set graphics rom address (external) from sprite code, flip mask, sprite size (2xV, 2xH), sprite horizontal tile and vertical line 
 -- rom data will be latch within sprite machine loop at sprite_state = "010" and sprite_state = "011"  
 with sprite_attr(1 downto 0) select
-sp_grphx_addr <=  (sp_code_ext(8 downto 0)                                    & sprite_vcnt(3) & sprite_hcnt(3 downto 2) & sprite_vcnt(2 downto 0) ) xor spflips when "00",
-									(sp_code_ext(8 downto 1) & 						      sprite_hcnt(4)  & sprite_vcnt(3) & sprite_hcnt(3 downto 2) & sprite_vcnt(2 downto 0) ) xor spflips when "01",
-									(sp_code_ext(8 downto 2) & sprite_vcnt(4) & sp_code_ext(0)  & sprite_vcnt(3) & sprite_hcnt(3 downto 2) & sprite_vcnt(2 downto 0) ) xor spflips when "10",
-									(sp_code_ext(8 downto 2) & sprite_vcnt(4) & sprite_hcnt(4)  & sprite_vcnt(3) & sprite_hcnt(3 downto 2) & sprite_vcnt(2 downto 0) ) xor spflips when others;
+sp_grphx_addr <=  (sp_code_ext(8 downto 0) & sprite_vcnt(3) & sprite_hcnt(3 downto 2) & sprite_vcnt(2 downto 0) ) xor spflips when "00",
+						(sp_code_ext(8 downto 1) & sprite_hcnt(4)  & sprite_vcnt(3) & sprite_hcnt(3 downto 2) & sprite_vcnt(2 downto 0) ) xor spflips when "01",
+						(sp_code_ext(8 downto 2) & sprite_vcnt(4) & sp_code_ext(0)  & sprite_vcnt(3) & sprite_hcnt(3 downto 2) & sprite_vcnt(2 downto 0) ) xor spflips when "10",
+						(sp_code_ext(8 downto 2) & sprite_vcnt(4) & sprite_hcnt(4)  & sprite_vcnt(3) & sprite_hcnt(3 downto 2) & sprite_vcnt(2 downto 0) ) xor spflips when others;
 
 -- set palette rom address with sprite color_set and serialized sprite graphics (1.5byte => 3bits) with respect to horizontal flip cmd
-sp_palette_addr <= sprite_color(5 downto 0) &
-									sp_grphx_1(to_integer(unsigned(      ((not sprite_hcnt(1 downto 0)) xor spflip_2H )))) &
-									sp_grphx_0(to_integer(unsigned('1' & ((not sprite_hcnt(1 downto 0)) xor spflip_2H )))) &
-									sp_grphx_0(to_integer(unsigned('0' & ((not sprite_hcnt(1 downto 0)) xor spflip_2H )))); 
+sp_palette_addr <=	sprite_color(5 downto 0) &
+							sp_grphx_1(to_integer(unsigned(      ((not sprite_hcnt(1 downto 0)) xor spflip_2H )))) &
+							sp_grphx_0(to_integer(unsigned('1' & ((not sprite_hcnt(1 downto 0)) xor spflip_2H )))) &
+							sp_grphx_0(to_integer(unsigned('0' & ((not sprite_hcnt(1 downto 0)) xor spflip_2H ))));
+							
 -- get sprite_color to be written from color palette or transparent (00) if color_set > 63
 with sprite_color(6) select
 	sp_color_wr <= sp_palette_msb_do(3 downto 0) & sp_palette_lsb_do(3 downto 0) when '0', X"00" when others; 
@@ -934,7 +911,7 @@ audio     => snd_audio
 -- should reflect content of xevious_cpu_gfx_8/16bits.bin loaded to external memory
 rom_bus_addr <= "000"   & cpu1_addr(13 downto 0) when cpu1_ena = '1'   else -- 0x0_0000 - 0x0_3FFF : 16K prog cpu1
 								"0010"  & cpu2_addr(12 downto 0) when cpu2_ena = '1'   else -- 0x0_4000 - 0x0_5FFF :  8K prog cpu2
- 				  			"00110" & cpu3_addr(11 downto 0) when cpu3_ena = '1'   else -- 0x0_6000 - 0x0_6FFF :  4K prog cpu3
+								"00110" & cpu3_addr(11 downto 0) when cpu3_ena = '1'   else -- 0x0_6000 - 0x0_6FFF :  4K prog cpu3
 								"00111" & fg_grphx_addr          when slot24 = "00101" else -- 0x0_7000 - 0x0_7FFF :  4K fg grphx   
 								"01000" & bg_grphx_addr          when slot24 = "01011" else -- 0x0_8000 - 0x0_8FFF :  4K bg grphx1   
 								"01001" & bg_grphx_addr          when slot24 = "10001" else -- 0x0_9000 - 0x0_9FFF :  4K bg grphx2
@@ -985,32 +962,36 @@ terrain_we   <= '1' when mux_cpu_we = '1' and ram_bus_addr(15 downto 12) = "1111
 process (reset, clock_18n, io_we) 
 	variable cs06XX_nmi_cnt : natural range 0 to 10000;
 begin
- if reset='1' then
-			irq1_clr_n  <= '0';
-			irq2_clr_n  <= '0';
-			nmion_n     <= '0';
-			reset_cpu_n <= '0';
-			cpu1_irq_n  <= '1';
-			cpu2_irq_n  <= '1';
-			cs51XX_coin_mode_cnt <= "000";
-			cs51XX_data_cnt <= "00";
-			cs50XX_cmd <= X"00";
-			flip_h <= '0';	
-			cs54xx_irq_n <= '1';
-			cs54xx_irq_cnt <= X"0";
-			cs50xx_irq_n <= '1';
-			cs50xx_irq_cnt <= X"0";
-			cs50xx_r0_port_in <= X"0";
-			cs50xx_k_port_in <= X"0";
- else 
-  if rising_edge(clock_18n) then 
+if reset='1' then
+	irq1_clr_n  <= '0';
+	irq2_clr_n  <= '0';
+	nmion_n     <= '0';
+	reset_cpu_n <= '0';
+	cpu1_irq_n  <= '1';
+	cpu2_irq_n  <= '1';
+	flip_h <= '0';	
+	
+	cs50XX_cmd <= X"00";
+	cs50xx_irq_n <= '1';
+	cs50xx_irq_cnt <= X"0";
+	cs50xx_r0_port_in <= X"0";
+	cs50xx_k_port_in <= X"0";
+
+	cs51XX_coin_mode_cnt <= "000";
+	cs51XX_data_cnt <= "00";
+	
+	cs54xx_irq_n <= '1';
+	cs54xx_irq_cnt <= X"0";
+else 
+	if rising_edge(clock_18n) then 
+		-- Latch Write Enable
 		if latch_we = '1' and ram_bus_addr(5 downto 4) = "10" then 
 			if ram_bus_addr(2 downto 0) = "000" then irq1_clr_n  <= mux_cpu_do(0); end if;
 			if ram_bus_addr(2 downto 0) = "001" then irq2_clr_n  <= mux_cpu_do(0); end if;
 			if ram_bus_addr(2 downto 0) = "010" then nmion_n     <= mux_cpu_do(0); end if;
 			if ram_bus_addr(2 downto 0) = "011" then reset_cpu_n <= mux_cpu_do(0); end if;
 		end if;
-		
+		-- Port Write Enable
 		if port_we = '1' then 
 			if ram_bus_addr(6 downto 4) = "000" then bg_offset_h <= ram_bus_addr(0) & mux_cpu_do; end if;
 			if ram_bus_addr(6 downto 4) = "001" then fg_offset_h <= ram_bus_addr(0) & mux_cpu_do; end if;
@@ -1018,64 +999,87 @@ begin
 			if ram_bus_addr(6 downto 4) = "011" then fg_offset_v <= ram_bus_addr(0) & mux_cpu_do; end if;
 			if ram_bus_addr(6 downto 4) = "111" then flip_h <= mux_cpu_do(0); end if;
 		end if;
-
+		-- Terrain Write Enable
 		if terrain_we = '1' then 
 			if ram_bus_addr(0) = '0' then terrain_bs0 <= mux_cpu_do; end if;
 			if ram_bus_addr(0) = '1' then terrain_bs1 <= mux_cpu_do; end if;
 		end if;
 
 		if irq1_clr_n = '0' then 
-		  cpu1_irq_n <= '1';
-		elsif vcnt = std_logic_vector(to_unsigned(240,9)) and hcnt = std_logic_vector(to_unsigned(128,9)) then cpu1_irq_n <= '0';
+			cpu1_irq_n <= '1';
+		elsif vcnt = std_logic_vector(to_unsigned(240,9)) and hcnt = std_logic_vector(to_unsigned(128,9)) then 
+			cpu1_irq_n <= '0';
  		end if;
-		if irq2_clr_n = '0' then 
-		  cpu2_irq_n <= '1';
-		elsif vcnt = std_logic_vector(to_unsigned(240,9)) and hcnt = std_logic_vector(to_unsigned(128,9)) then cpu2_irq_n <= '0';
-		end if;
 
-		if cs54xx_irq_cnt = X"0" then 
-		  cs54xx_irq_n <= '1';
-		else 
-			if cs54xx_ena = '1' then
-				cs54xx_irq_cnt <= cs54xx_irq_cnt - '1';
-			end if;
+		if irq2_clr_n = '0' then 
+			cpu2_irq_n <= '1';
+		elsif vcnt = std_logic_vector(to_unsigned(240,9)) and hcnt = std_logic_vector(to_unsigned(128,9)) then 
+			cpu2_irq_n <= '0';
 		end if;
 
 		if cs50xx_irq_cnt = X"0" then 
-		  cs50xx_irq_n <= '1';
+			cs50xx_irq_n <= '1';
+		else
+			if cs54xx_ena = '1' then								-- Interesting
+				cs50xx_irq_cnt <= cs50xx_irq_cnt - '1';
+			end if;
+		end if;
+
+		if cs54xx_irq_cnt = X"0" then 
+			cs54xx_irq_n <= '1';
 		else 
 			if cs54xx_ena = '1' then
-				cs50xx_irq_cnt <= cs50xx_irq_cnt - '1';
+				cs54xx_irq_cnt <= cs54xx_irq_cnt - '1';
 			end if;
 		end if;
 	
 		-- write to cs06XX
 		if io_we = '1' then 
 			-- write to data register (0x7000)
-		  if ram_bus_addr(8) = '0' then
+			if ram_bus_addr(8) = '0' then
 				-- write data to device#4 (cs54XX)
 				if cs06XX_control(3 downto 0) = "1000" then
-						-- write data for k and r#0 port and launch irq to advice cs50xx
-						cs54xx_k_port_in <= mux_cpu_do(7 downto 4);
-						cs54xx_r0_port_in <= mux_cpu_do(3 downto 0);
-						cs54xx_irq_n <= '0';
-						cs54xx_irq_cnt <= X"7";						
+					-- write data for k and r#0 port and launch irq to advice cs50xx
+					cs54xx_k_port_in <= mux_cpu_do(7 downto 4);
+					cs54xx_r0_port_in <= mux_cpu_do(3 downto 0);
+					cs54xx_irq_n <= '0';
+					cs54xx_irq_cnt <= X"7";
 				end if;
+				
 				-- write data to device#1 (cs51XX)
+				-- commands
+				--  00: nop
+				--  01 + 4 arguments: set coinage (xevious, possibly because of a bug, is different)
+				--    - Set counter to "3b'100" "1d'4"
+				--		- Do nothing
+				--  02: go in "credit" mode and enable start buttons
+				--    - cs51XX_credit_mode <= '1'
+				--  03: disable joystick remapping
+				--    - Not implemented
+				--  04: enable joystick remapping
+				--    - Not implemented
+				--  05: go in "switch" mode
+				--    - cs51XX_switch_mode <= '1'
+				--  06: nop
+				--  07: nop
+				
 				if cs06XX_control(3 downto 0) = "0001" then
 					-- when not in coin mode
 					if cs51XX_coin_mode_cnt = "000" then
 						-- if data = 1 enter coin mode for next 4 write operations
+						--  01 + 4 arguments: set coinage (xevious, possibly because of a bug, is different)
 						if mux_cpu_do(2 downto 0) = "001" then
 							cs51XX_coin_mode_cnt <= "100";
 						end if;
 						-- if data = 2 enter credit mode
+						--  02: go in "credit" mode and enable start buttons
 						if mux_cpu_do(2 downto 0) = "010" then
 							cs51XX_switch_mode <= '0';
 							cs51XX_credit_mode <= '1';
 							cs51XX_data_cnt <= "00";
 						end if;
 						-- if data = 5 enter switch mode 
+						--  05: go in "switch" mode
 						if mux_cpu_do(2 downto 0) = "101" then
 							cs51XX_switch_mode <= '1';  -- '1' for galaga '0' for xevious (see klugde mode ) TBC
 							cs51XX_credit_mode <= '0';
@@ -1088,15 +1092,9 @@ begin
 						cs51XX_coin_mode_cnt <= cs51XX_coin_mode_cnt - "001";
 					end if;	
 				end if;
+				
 				-- write data to device#3 (cs50XX)
--- rough emulation
-				if cs06XX_control(3 downto 0) = "0100" then
-						-- keep written data as cmd and reset read counter
-						cs50XX_cmd <= mux_cpu_do;
-						cs50XX_data_cnt <= "00";     -- !!!! cs51xx_data_cnt TBC
-				end if;
-
--- mb88 emulation
+			-- mb88 emulation
 				if cs06XX_control(3 downto 0) = "0100" then
 				-- write data for k and r#0 port and reset irq counter
 						cs5Xxx_rw <= cs06XX_control(4);
@@ -1160,144 +1158,120 @@ begin
 				if cs51XX_data_cnt = "10" then cs51XX_data_cnt <= "00"; 
 				else cs51XX_data_cnt <= cs51XX_data_cnt + "01"; end if;
 			end if;
+			
 			if cs06XX_control(3 downto 0) = "0100" then
-				-- cs50xx (rough emulation)
-				if cs50XX_data_cnt = "11" then cs50XX_data_cnt <= "00"; 
-				else cs50XX_data_cnt <= cs50XX_data_cnt + "01"; end if;
 				-- cs50xx (m88 emulation)
 				cs5Xxx_rw <= cs06XX_control(4);  -- launch irq to request next read
 				cs50xx_irq_n <= '0';
 				cs50xx_irq_cnt <= X"7";						
-	
 			end if;				
 		end if;
 		
 		-- manage credit count (bcd)
-		--   increase at each coin up to 99
+		-- increase at each coin up to 99
 		coin_r <= coin;
 		start1_r <= start1;
 		start2_r <= start2;
+
 		if coin = '1' and coin_r = '0' then 
-			if credit_bcd_0 = "1001" then 
-				if credit_bcd_1 /= "1001" then
-					credit_bcd_1 <= credit_bcd_1 + "0001";
-					credit_bcd_0 <= "0000";
+			if credit_bcd_0 = "1001" then							-- If 1s == 9
+				if credit_bcd_1 /= "1001" then					-- If 10s /= 9
+					credit_bcd_1 <= credit_bcd_1 + "0001";		-- 10s + 1
+					credit_bcd_0 <= "0000";							-- 1s = 0
 				end if;
 			else
-				credit_bcd_0 <= credit_bcd_0 + "0001";
+				credit_bcd_0 <= credit_bcd_0 + "0001";			-- 1s + 1
 			end if; 
 		end if;
 		
-	  -- decrease credit only when in credit mode
+		-- decrease credit only when in credit mode
 		-- CPU spy this counter to start a new game
 		if cs51XX_credit_mode = '1' then
-			  -- decreasing credit by 1 will start a new game for 1 player
+			-- decreasing credit by 1 will start a new game for 1 player
 			if (start1 = '0' and start1_r = '1') then
 				cs51XX_credit_mode <= '0';
-				if credit_bcd_0 = "0000" then 
-					if credit_bcd_1 /= "0000" then
-						credit_bcd_1 <= credit_bcd_1 - "0001";
-						credit_bcd_0 <= "1001";
+				if credit_bcd_0 = "0000" then 					-- if 1s == 0
+					if credit_bcd_1 /= "0000" then				-- if 10s /= 0
+						credit_bcd_1 <= credit_bcd_1 - "0001";	-- 10s - 1
+						credit_bcd_0 <= "1001";						-- 1s = 9
 					end if;
 				else
-					credit_bcd_0 <= credit_bcd_0 - "0001";
+					credit_bcd_0 <= credit_bcd_0 - "0001";		-- 1s - 1
 				end if; 		
 			end if;
 
-		  -- decreasing credit by 2 (at once) will start a new game for 2 player
+			-- decreasing credit by 2 (at once) will start a new game for 2 player
 			if (start2 = '0' and start2_r = '1') then
-				if credit_bcd_0 = "0000" or credit_bcd_0 = "0001" then
- 					if credit_bcd_1 /= "0000" then
+				if credit_bcd_0 = "0000" or credit_bcd_0 = "0001" then	-- if 1s == 0 or 1s == 1
+ 					if credit_bcd_1 /= "0000" then									-- if 10's /= 0					
 						cs51XX_credit_mode <= '0';
-						credit_bcd_1 <= credit_bcd_1 - "0001";
-						if credit_bcd_0 = "0000" then 
-							credit_bcd_0 <= "1000";
-						else
-							credit_bcd_0 <= "1001";
-						end if;
+						credit_bcd_1 <= credit_bcd_1 - "0001";							-- 10s - 1
+						if credit_bcd_0 = "0000" then 									-- if 1s == 0
+							credit_bcd_0 <= "1000";											-- 1s = 8
+						else																	-- else
+							credit_bcd_0 <= "1001";											-- 1s = 9
+						end if;																-- end if
 					end if;
-				else
+				else																		-- else
 					cs51XX_credit_mode <= '0';
-					credit_bcd_0 <= credit_bcd_0 - "0010";					
-				end if;
+					credit_bcd_0 <= credit_bcd_0 - "0010";							-- 1s - 2					
+				end if;																	-- end if
 			end if;
 		end if;
-		
-  end if;
- end if;
+	end if;
+end if;
 end process;
 
 -- namco cs51XX joy remap LUT (active for xevious)
-buttons <= left & down & right & up;
+--left, down, right, up
+buttons <= joystick(0) & joystick(1) & joystick(2) & joystick(3);
 with buttons select
-joy <= X"8" when "0000",
-       X"0" when "0001",
-			 X"2" when "0010",
-			 X"1" when "0011",
-			 X"4" when "0100",
-			 X"A" when "0101",
-			 X"3" when "0110",
-			 X"B" when "0111",
-			 X"6" when "1000",
-			 X"7" when "1001",
-			 X"9" when "1010",
-			 X"C" when "1011",
-			 X"5" when "1100",
-			 X"D" when "1101",
-			 X"E" when "1110",
-			 X"F" when others;
+joy <=	X"8" when "0000",
+			X"0" when "0001",
+			X"2" when "0010",
+			X"1" when "0011",
+			X"4" when "0100",
+			X"8" when "0101",
+			X"3" when "0110",
+			X"2" when "0111",
+			X"6" when "1000",
+			X"7" when "1001",
+			X"8" when "1010",
+			X"8" when "1011",
+			X"5" when "1100",
+			X"6" when "1101",
+			X"8" when "1110",
+			X"F" when others;
 
 -- swicth mode reply with respect to reply rank
-with cs51XX_data_cnt select
-cs51XX_switch_mode_do <= 	not (left & '0' & right & '0' & left & '0' & right & '0' )         when "00",
-													not (b_test & b_svce & '0' & coin & start2 & start1 & fire & fire) when "01",
-													X"00" when others;	
--- N.U. (galaga configuration)
---cs51XX_switch_mode_do <= 	not (left2 & '0' & right2 & '0' & left1 & '0' & right1 & '0' )       when "00",
---													not (b_test & b_svce & '0' & coin & start2 & start1 & fire2 & fire1) when "01",
---													X"00" when others;	
+
+with cs51xx_data_cnt select
+cs51xx_switch_mode_do 		<=	not (joystick(0) & '0' & joystick(1) & '0' & joystick(2) & '0' & joystick(3) & '0') when "00",
+--										not (credits & controls) when "01",
+										X"00" when others;	
 
 -- non swicth mode reply with respect to reply rank
+--  Coin Digit 10s - credit_bcd_1
+--  Coin Digit 1s  - credit_bcd_0
 with cs51XX_data_cnt select
-cs51XX_non_switch_mode_do <= 	credit_bcd_1 & credit_bcd_0 when "00", -- credits (cpu spy this to start a new game)
-															"00" & not fire & '1' & joy when "01",
-															X"38" when "10",
-															X"00" when "11"; -- N.U.	
-															
--- N.U. (galaga configuration)
---cs51XX_non_switch_mode_do <= 	credit_bcd_1 & credit_bcd_0 when "00", -- credits (cpu spy this)
---															not ("110" & fire1 & left1 & '0' & right1 & '0' ) when "01",
---															not ("110" & fire2 & left2 & '0' & right2 & '0' ) when "10",
---															X"00" when "11"; -- N.U.	
+cs51XX_non_switch_mode_do	<= credit_bcd_1 & credit_bcd_0 when "00", 			-- credits (cpu spy this to start a new game)
+										"00" & not controls(1) & '1' & joy when "01",	-- "00" & not fire & '1' & joy when "01",
+--										X"38" when "10",
+--										X"00" when "11"; 											-- N.U.
+										X"00" when others;	
 
 -- select reply with respect to current mode 
 cs51XX_do <= cs51XX_switch_mode_do when cs51XX_switch_mode = '1' else cs51XX_non_switch_mode_do;
 
--- reply for cmd_80 mode (rough emulation)
-with cs50XX_data_cnt select
-cs50XX_cmd_80_do <= 	X"80" when "00",
-											X"00" when "01",
-											X"00" when "10",
-										  X"05"	when others;	
-
--- reply for cmd_E5 mode (rough emulation)
-with cs50XX_data_cnt select
-cs50XX_cmd_E5_do <= 	X"F0" when "00",
-											X"00" when "01",
-											X"00" when "10",
-										  X"95"	when others;	
-
--- select reply with respect to current mode (rough emulation)
---cs50XX_do <= cs50XX_cmd_80_do when cs50XX_cmd = X"80" else cs50XX_cmd_E5_do;
 -- mb88 emulation
 cs50XX_do <= cs50XX_oh_port_out & cs50XX_ol_port_out; -- keep this line for cs50xx true mb88 emulation
 
 -- select custom chip reply depending on current control mode for data read request
 with cs06XX_control(3 downto 0) select
 cs06XX_di <= cs51XX_do when "0001",
-						 cs50XX_do when "0100",
---						 cs54XX_do when "1000",
-						 X"00" when others;
+				 cs50XX_do when "0100",
+--				 cs54XX_do when "1000",
+				 X"00" when others;
 
 -- select reply depending on data or control read
 cs06XX_do <= cs06XX_di when ram_bus_addr(8)= '0' else cs06XX_control;
@@ -1305,27 +1279,31 @@ cs06XX_do <= cs06XX_di when ram_bus_addr(8)= '0' else cs06XX_control;
 -- trigger CPU3 nmi when enable during line 0x40 and 0x60
 process (clock_18, nmion_n)
 begin
- if nmion_n = '1' then
- elsif rising_edge(clock_18) and ena_vidgen = '1' then
+if nmion_n = '1' then
+	elsif rising_edge(clock_18) and ena_vidgen = '1' then
 		if hcnt = "100000000" then
-			if vcnt = "001000000" or vcnt = "011000000" then cpu3_nmi_n <= '0'; end if;
-			if vcnt = "001000001" or vcnt = "011000001" then cpu3_nmi_n <= '1'; end if;
+			if vcnt = "001000000" or vcnt = "011000000" then
+				cpu3_nmi_n <= '0';
+			end if;
+			if vcnt = "001000001" or vcnt = "011000001" then
+				cpu3_nmi_n <= '1';
+			end if;
 		end if;
- end if;
+	end if;
 end process;
 
 -- multiplex ram/rom/devices data out to cpu di with respect to multiplexed cpu address
 -- remenber : rom_bus_addr = ram_bus_addr for any cpu access (see addressing scheme)
 with ram_bus_addr(15 downto 11) select
-cpus_di <= 	rom_bus_do when "00000",
-						rom_bus_do when "00001",
-						rom_bus_do when "00010",
-						rom_bus_do when "00011",
-						rom_bus_do when "00100",
-						rom_bus_do when "00101",
-						rom_bus_do when "00110",
- 						rom_bus_do when "00111",
-						"000000" & dip_switch_do when "01101",
+cpus_di <= 			rom_bus_do  when "00000",
+						rom_bus_do  when "00001",
+						rom_bus_do  when "00010",
+						rom_bus_do  when "00011",
+						rom_bus_do  when "00100",
+						rom_bus_do  when "00101",
+						rom_bus_do  when "00110",
+ 						rom_bus_do  when "00111",
+	  "000000" & dip_switch_do when "01101",
 						cs06XX_do   when "01110",
 						wram0_do    when "01111",
 						wram1_do    when "10000",

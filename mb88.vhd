@@ -198,13 +198,13 @@ rom_addr <= r_pa & r_pc;
 
 ram_addr <= X"0" & rom_data(2 downto 0) when ((rom_data >= X"50") and (rom_data <= X"57")) else r_x(2 downto 0) & r_y;
 
-ram_we <= '1' when(( (rom_data = X"1D")  or  (rom_data = X"1A") or
-                     (rom_data = X"0A")  or  (rom_data = X"0B") or
-										 (rom_data = X"2A")  or
-                     (rom_data = X"19")  or  (rom_data = X"09") or 
-									  ((rom_data >= X"30") and (rom_data <= X"37") ) or
-									  ((rom_data >= X"50") and (rom_data <= X"57") )
-									 ) and (single_byte_op = '1')and ena = '1')
+ram_we <= '1' when(( (rom_data = X"1D")  or  (rom_data = X"1A")    or
+                     (rom_data = X"0A")  or  (rom_data = X"0B")    or
+							(rom_data = X"2A")  or  (rom_data = X"19")    or
+							(rom_data = X"09")  or 
+ 						  ((rom_data >= X"30") and (rom_data <= X"37"))  or
+						  ((rom_data >= X"50") and (rom_data <= X"57"))) and 
+						  (single_byte_op = '1') and ena = '1')
 							else '0';
 
 with rom_data select
@@ -559,7 +559,6 @@ begin
 					when others => r_stf <='1';
 				end case;
 			end if;
-			
 		end if;
 	end if;
  end if;

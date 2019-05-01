@@ -3,6 +3,8 @@
 -- Arcade: Xevious port to MiSTer by Sorgelig
 -- 23 October 2017
 -- 
+-- Revised: 
+-- 1 May 2019
 ---------------------------------------------------------------------------------
 -- Xevious by Dar (darfpga@aol.fr) (01 May 2017)
 -- http://darfpga.blogspot.fr
@@ -21,19 +23,32 @@
 -- Support screen and controls rotation on HDMI output.
 -- Only controls are rotated on VGA output.
 -- 
--- 
 -- Keyboard inputs :
 --
---   F3          : Add coin
---   F2          : Start 2 players
---   F1          : Start 1 player
+--   F1, 1                     : Start 1 player
+--   F2, 2                     : Start 2 players
+--   F3, 5, 6                  : Add coin
 --   UP,DOWN,LEFT,RIGHT arrows : Movements
---   SPACE       : Fire  
---   CTRL        : Bomb
+--   SPACE                     : Fire  
+--   CTRL                      : Bomb
+--   P                         : Pause
 --
--- Joystick support.
+--   Joystick support.
 -- 
+---------------------------------------------------------------------------------
 -- 
+-- This port from http://darfpga.blogspot.fr has partial implementation of 
+-- Namco custom chips which leads to limitations such as the following:
+-- 
+--   • Cocktail mode is not functioning properly.
+--   • Coin logic is hard coded to 1 coin / 1 credit.
+--   • Errors when loading Super Xevious or Super Xevious Plus.
+-- 
+-- Super Xevious and Super Xevious Plus do work but require pause
+-- to be pressed at startup. Credits will be FF and controls will not
+-- work. Right arrow will start a two player game and after game overs
+-- everything will start to work properly.
+--  
 ---------------------------------------------------------------------------------
 
                                 *** Attention ***
